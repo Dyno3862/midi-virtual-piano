@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+.DS_Store
+*.love
+MidiFiles/
+.midi_piano_recent.json
+.midi_piano_folder.txt
