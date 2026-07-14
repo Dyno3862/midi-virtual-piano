@@ -436,6 +436,57 @@ end
 -- GUI  (Roblox). If you're on a different engine, replace this block; the
 -- engine-agnostic core above (parse/map/fetch/autoplay) stays the same.
 -- ===========================================================================
+-- device detection: MOBILE = touch AND no physical keyboard, so a touch laptop
+-- (touch + keyboard) stays on desktop. Console (ten-foot UI) uses desktop too.
+local function detectMobile()
+  local UIS = game:GetService("UserInputService")
+  local okC, isConsole = pcall(function()
+    return game:GetService("GuiService"):IsTenFootInterface()
+  end)
+  if okC and isConsole then return false end
+  local touch = UIS.TouchEnabled
+  local kb    = UIS.KeyboardEnabled
+  local mouse = UIS.MouseEnabled
+  if touch and (not kb) then return true end            -- primary signal
+  local vpX = 1000
+  local cam = workspace.CurrentCamera
+  if cam then vpX = cam.ViewportSize.X end
+  if touch and (not mouse) and vpX <= 900 then return true end   -- tablet fallback
+  return false
+end
+
+-- layout constants: DESKTOP = original values (unchanged); MOBILE = compact
+-- panel with finger-sized targets and larger fonts. The GUI build reads L.*,
+-- so there is only ONE build path for both.
+local DESKTOP = {
+  winW=320, winH=404, winX=20, winY=60, pad=10, corner=6, cornerSm=5,
+  titleH=24, titleFont=16,
+  srcY=32, srcH=26, srcFont=12,
+  searchY=64, searchH=28, searchFont=14,
+  listY=98, listH=190, scrollBar=6,
+  rowH=28, rowFont=13, rowInset=8,
+  statusY=292, statusH=32, statusFont=13,
+  tunY=328, tunH=26, tunFont=13,
+  tempoLblX=10, tempoLblW=46, tempoBoxX=58, tempoBoxW=56,
+  holdLblX=126, holdLblW=52, holdBoxX=182, holdBoxW=60,
+  playY=362, btnH=34, btnFont=14, playX=10, playW=145, stopX=165, stopW=145,
+}
+local MOBILE = {
+  winW=250, winH=398, winX=10, winY=40, pad=8, corner=8, cornerSm=6,
+  titleH=26, titleFont=18,
+  srcY=38, srcH=34, srcFont=13,
+  searchY=78, searchH=36, searchFont=16,
+  listY=120, listH=150, scrollBar=12,
+  rowH=40, rowFont=16, rowInset=8,
+  statusY=276, statusH=28, statusFont=13,
+  tunY=308, tunH=34, tunFont=15,
+  tempoLblX=8, tempoLblW=44, tempoBoxX=54, tempoBoxW=52,
+  holdLblX=112, holdLblW=42, holdBoxX=158, holdBoxW=84,
+  playY=348, btnH=42, btnFont=16, playX=8, playW=112, stopX=130, stopW=112,
+}
+local IS_MOBILE = detectMobile()
+local L = IS_MOBILE and MOBILE or DESKTOP
+
 local function buildGui()
   local Players = game:GetService("Players")
   local plr = Players.LocalPlayer
@@ -448,24 +499,25 @@ local function buildGui()
     return o
   end
   local function corner(o, r)
-    local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r or 6); u.Parent = o
+    local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r or L.corner); u.Parent = o
     return o
   end
+  local pad = L.pad
 
   local sg = make("ScreenGui", { Name="MidiAutoplay", ResetOnSpawn=false })
   sg.Parent = parent
-  local win = corner(make("Frame", { Parent=sg, Size=UDim2.new(0,320,0,404),
-    Position=UDim2.new(0,20,0,60), BackgroundColor3=C(24,26,31), BorderSizePixel=0,
+  local win = corner(make("Frame", { Parent=sg, Size=UDim2.new(0,L.winW,0,L.winH),
+    Position=UDim2.new(0,L.winX,0,L.winY), BackgroundColor3=C(24,26,31), BorderSizePixel=0,
     Active=true, Draggable=true }))
 
-  make("TextLabel", { Parent=win, Size=UDim2.new(1,0,0,24), Position=UDim2.new(0,0,0,6),
+  make("TextLabel", { Parent=win, Size=UDim2.new(1,0,0,L.titleH), Position=UDim2.new(0,0,0,6),
     BackgroundTransparency=1, Text="MIDI Autoplay", TextColor3=C(230,235,245),
-    Font=Enum.Font.GothamBold, TextSize=16 })
+    Font=Enum.Font.GothamBold, TextSize=L.titleFont })
 
   -- source selector: My Collection / BitMidi / MIDIFind
   State.source = "collection"
   local srcRow = make("Frame", { Parent=win, BackgroundTransparency=1,
-    Size=UDim2.new(1,-20,0,26), Position=UDim2.new(0,10,0,32) })
+    Size=UDim2.new(1,-2*pad,0,L.srcH), Position=UDim2.new(0,pad,0,L.srcY) })
   local srcButtons = {}
   local function setSource(src)
     State.source = src
@@ -476,7 +528,7 @@ local function buildGui()
   local function mkSrc(key, label, xscale)
     local b = corner(make("TextButton", { Parent=srcRow, Size=UDim2.new(0.32,0,1,0),
       Position=UDim2.new(xscale,0,0,0), BackgroundColor3=C(40,43,50), TextColor3=C(230,235,245),
-      Text=label, Font=Enum.Font.Gotham, TextSize=12, AutoButtonColor=true }), 5)
+      Text=label, Font=Enum.Font.Gotham, TextSize=L.srcFont, AutoButtonColor=true }), L.cornerSm)
     srcButtons[key] = b; return b
   end
   local bCol = mkSrc("collection","My Collection",0)
@@ -484,42 +536,43 @@ local function buildGui()
   local bMid = mkSrc("midifind","MIDIFind",0.68)
 
   -- search box
-  local search = corner(make("TextBox", { Parent=win, Size=UDim2.new(1,-20,0,28),
-    Position=UDim2.new(0,10,0,64), BackgroundColor3=C(38,41,48), TextColor3=C(220,225,235),
-    PlaceholderText="Search... (press Enter)", Text="", Font=Enum.Font.Gotham, TextSize=14,
+  local search = corner(make("TextBox", { Parent=win, Size=UDim2.new(1,-2*pad,0,L.searchH),
+    Position=UDim2.new(0,pad,0,L.searchY), BackgroundColor3=C(38,41,48), TextColor3=C(220,225,235),
+    PlaceholderText="Search... (press Enter)", Text="", Font=Enum.Font.Gotham, TextSize=L.searchFont,
     ClearTextOnFocus=false }))
 
   -- results list
-  local list = corner(make("ScrollingFrame", { Parent=win, Size=UDim2.new(1,-20,0,190),
-    Position=UDim2.new(0,10,0,98), BackgroundColor3=C(18,20,24), BorderSizePixel=0,
-    ScrollBarThickness=6, CanvasSize=UDim2.new() }))
+  local list = corner(make("ScrollingFrame", { Parent=win, Size=UDim2.new(1,-2*pad,0,L.listH),
+    Position=UDim2.new(0,pad,0,L.listY), BackgroundColor3=C(18,20,24), BorderSizePixel=0,
+    ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new() }))
   local layout = make("UIListLayout", { Parent=list, Padding=UDim.new(0,4),
     SortOrder=Enum.SortOrder.LayoutOrder })
 
   -- status
-  local status = make("TextLabel", { Parent=win, Size=UDim2.new(1,-20,0,32),
-    Position=UDim2.new(0,10,0,292), BackgroundTransparency=1, Text="Loading collection...",
-    TextColor3=C(120,220,170), Font=Enum.Font.Gotham, TextSize=13, TextWrapped=true,
+  local status = make("TextLabel", { Parent=win, Size=UDim2.new(1,-2*pad,0,L.statusH),
+    Position=UDim2.new(0,pad,0,L.statusY), BackgroundTransparency=1, Text="Loading collection...",
+    TextColor3=C(120,220,170), Font=Enum.Font.Gotham, TextSize=L.statusFont, TextWrapped=true,
     TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top })
   setStatus = function(t) status.Text = t end
 
-  -- ##### TUNABLES: exact typed numbers (no sliders) #####
-  make("TextLabel", { Parent=win, Size=UDim2.new(0,46,0,26), Position=UDim2.new(0,10,0,328),
-    BackgroundTransparency=1, Text="Tempo", TextColor3=C(200,205,215),
-    Font=Enum.Font.Gotham, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left })
-  local tempoBox = corner(make("TextBox", { Parent=win, Size=UDim2.new(0,56,0,26),
-    Position=UDim2.new(0,58,0,328), BackgroundColor3=C(38,41,48), TextColor3=C(225,230,240),
-    Text=string.format("%.2f", State.speed), Font=Enum.Font.Gotham, TextSize=13,
-    ClearTextOnFocus=false }), 5)
-  make("TextLabel", { Parent=win, Size=UDim2.new(0,52,0,26), Position=UDim2.new(0,126,0,328),
-    BackgroundTransparency=1, Text="Hold(s)", TextColor3=C(200,205,215),
-    Font=Enum.Font.Gotham, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left })
-  local holdBox = corner(make("TextBox", { Parent=win, Size=UDim2.new(0,60,0,26),
-    Position=UDim2.new(0,182,0,328), BackgroundColor3=C(38,41,48), TextColor3=C(225,230,240),
-    Text=string.format("%.3f", CONFIG.keyTap), Font=Enum.Font.Gotham, TextSize=13,
-    ClearTextOnFocus=false }), 5)
+  -- TUNABLES: exact typed numbers (no sliders)
+  make("TextLabel", { Parent=win, Size=UDim2.new(0,L.tempoLblW,0,L.tunH),
+    Position=UDim2.new(0,L.tempoLblX,0,L.tunY), BackgroundTransparency=1, Text="Tempo",
+    TextColor3=C(200,205,215), Font=Enum.Font.Gotham, TextSize=L.tunFont,
+    TextXAlignment=Enum.TextXAlignment.Left })
+  local tempoBox = corner(make("TextBox", { Parent=win, Size=UDim2.new(0,L.tempoBoxW,0,L.tunH),
+    Position=UDim2.new(0,L.tempoBoxX,0,L.tunY), BackgroundColor3=C(38,41,48), TextColor3=C(225,230,240),
+    Text=string.format("%.2f", State.speed), Font=Enum.Font.Gotham, TextSize=L.tunFont,
+    ClearTextOnFocus=false }), L.cornerSm)
+  make("TextLabel", { Parent=win, Size=UDim2.new(0,L.holdLblW,0,L.tunH),
+    Position=UDim2.new(0,L.holdLblX,0,L.tunY), BackgroundTransparency=1, Text="Hold(s)",
+    TextColor3=C(200,205,215), Font=Enum.Font.Gotham, TextSize=L.tunFont,
+    TextXAlignment=Enum.TextXAlignment.Left })
+  local holdBox = corner(make("TextBox", { Parent=win, Size=UDim2.new(0,L.holdBoxW,0,L.tunH),
+    Position=UDim2.new(0,L.holdBoxX,0,L.tunY), BackgroundColor3=C(38,41,48), TextColor3=C(225,230,240),
+    Text=string.format("%.3f", CONFIG.keyTap), Font=Enum.Font.Gotham, TextSize=L.tunFont,
+    ClearTextOnFocus=false }), L.cornerSm)
 
-  -- validate + clamp a typed number, writing the clean value back into the box
   local function numField(box, getCur, lo, hi, fmt, apply)
     box.FocusLost:Connect(function()
       local n = tonumber(box.Text)
@@ -527,7 +580,7 @@ local function buildGui()
         if n < lo then n = lo elseif n > hi then n = hi end
         apply(n); box.Text = string.format(fmt, n)
       else
-        box.Text = string.format(fmt, getCur())   -- revert invalid input
+        box.Text = string.format(fmt, getCur())
       end
     end)
   end
@@ -537,12 +590,12 @@ local function buildGui()
     function(n) CONFIG.keyTap = n end)
 
   -- play / stop
-  local playBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,145,0,34),
-    Position=UDim2.new(0,10,0,362), BackgroundColor3=C(40,120,80), TextColor3=C(240,244,250),
-    Text="Play", Font=Enum.Font.GothamBold, TextSize=14, AutoButtonColor=true }))
-  local stopBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,145,0,34),
-    Position=UDim2.new(0,165,0,362), BackgroundColor3=C(150,60,60), TextColor3=C(240,244,250),
-    Text="Stop", Font=Enum.Font.GothamBold, TextSize=14, AutoButtonColor=true }))
+  local playBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,L.playW,0,L.btnH),
+    Position=UDim2.new(0,L.playX,0,L.playY), BackgroundColor3=C(40,120,80), TextColor3=C(240,244,250),
+    Text="Play", Font=Enum.Font.GothamBold, TextSize=L.btnFont, AutoButtonColor=true }))
+  local stopBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,L.stopW,0,L.btnH),
+    Position=UDim2.new(0,L.stopX,0,L.playY), BackgroundColor3=C(150,60,60), TextColor3=C(240,244,250),
+    Text="Stop", Font=Enum.Font.GothamBold, TextSize=L.btnFont, AutoButtonColor=true }))
   playBtn.MouseButton1Click:Connect(function()
     if State.prepared then startPlayback() else setStatus("Pick a song first.") end
   end)
@@ -555,10 +608,10 @@ local function buildGui()
       if ch:IsA("TextButton") then ch:Destroy() end
     end
     for i,entry in ipairs(entries) do
-      local b = corner(make("TextButton", { Parent=list, Size=UDim2.new(1,-8,0,28),
+      local b = corner(make("TextButton", { Parent=list, Size=UDim2.new(1,-L.rowInset,0,L.rowH),
         BackgroundColor3=C(34,37,44), TextColor3=C(225,230,240), Text="  "..entry.name,
-        Font=Enum.Font.Gotham, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
-        LayoutOrder=i, TextTruncate=Enum.TextTruncate.AtEnd }), 5)
+        Font=Enum.Font.Gotham, TextSize=L.rowFont, TextXAlignment=Enum.TextXAlignment.Left,
+        LayoutOrder=i, TextTruncate=Enum.TextTruncate.AtEnd }), L.cornerSm)
       b.MouseButton1Click:Connect(function() loadAndMaybePlay(entry, true) end)
     end
     list.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 8)
@@ -606,7 +659,7 @@ local function buildGui()
     if not files then setStatus("Collection error: "..tostring(err)); return end
     repoFiles = files
     if State.source == "collection" then populate(files) end
-    setStatus(#files.." songs in your collection. Pick one to play.")
+    setStatus((IS_MOBILE and "[Mobile] " or "")..#files.." songs in your collection. Pick one to play.")
   end)
 end
 
