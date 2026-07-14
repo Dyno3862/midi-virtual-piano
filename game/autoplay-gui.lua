@@ -68,16 +68,42 @@ local KEYCODES = {
   n=Enum.KeyCode.N, m=Enum.KeyCode.M,
 }
 
-local function sendKey(char, isDown)
+-- Track which keys are currently held so we NEVER leave one stuck. A stuck key
+-- (keyDown with no matching keyUp) makes Roblox treat it as already-down, so a
+-- later SendKeyEvent(down) for that key fires NO new InputBegan -- exactly the
+-- "letters stopped registering but Shift still worked" bug.
+local heldKeys = {}       -- [char] = true while held down
+local heldShift = false
+
+local function rawKey(char, isDown)
   local kc = KEYCODES[char]
   if kc then VIM:SendKeyEvent(isDown, kc, false, game) end
+  -- a char with no KeyCode is silently skipped (degrades gracefully, no error)
 end
-function Adapter.keyDown(char) sendKey(char, true)  end   -- fires InputBegan
-function Adapter.keyUp(char)   sendKey(char, false) end   -- fires InputEnded
--- sharps = Shift + natural. sendChord() below already orders these correctly:
---   shiftDown -> keyDown -> (hold keyTap) -> keyUp -> shiftUp
-function Adapter.shiftDown() VIM:SendKeyEvent(true,  Enum.KeyCode.LeftShift, false, game) end
-function Adapter.shiftUp()   VIM:SendKeyEvent(false, Enum.KeyCode.LeftShift, false, game) end
+
+function Adapter.keyDown(char)
+  if heldKeys[char] then rawKey(char, false) end   -- release a duplicate/stuck press first
+  rawKey(char, true)
+  heldKeys[char] = true
+end
+function Adapter.keyUp(char)
+  rawKey(char, false)
+  heldKeys[char] = nil
+end
+function Adapter.shiftDown()
+  if not heldShift then VIM:SendKeyEvent(true, Enum.KeyCode.LeftShift, false, game); heldShift = true end
+end
+function Adapter.shiftUp()
+  if heldShift then VIM:SendKeyEvent(false, Enum.KeyCode.LeftShift, false, game); heldShift = false end
+end
+-- release EVERYTHING still held (Stop, song end, error, and start of each Play)
+function Adapter.releaseAll()
+  for char in pairs(heldKeys) do rawKey(char, false) end
+  heldKeys = {}
+  if heldShift then
+    VIM:SendKeyEvent(false, Enum.KeyCode.LeftShift, false, game); heldShift = false
+  end
+end
 
 -- ---- TIMING ---------------------------------------------------------------
 function Adapter.now()
@@ -316,51 +342,79 @@ end
 -- AUTOPLAY ENGINE
 -- ===========================================================================
 local State = { speed = CONFIG.defaultSpeed, playing = false, stop = false,
-                prepared = nil, current = nil }
+                prepared = nil, current = nil, playToken = 0 }
 local setStatus  -- forward decl (GUI wires this)
 
+-- Play one chord. Every keyDown is guaranteed a keyUp; if anything errors
+-- mid-hit we release all held keys instead of leaving them stuck.
+-- Returns ok(boolean), err.
 local function sendChord(keys)
   local plain, sharp = {}, {}
   for _,k in ipairs(keys) do
     if k.shift then sharp[#sharp+1]=k.key else plain[#plain+1]=k.key end
   end
-  if #plain > 0 then
-    for _,c in ipairs(plain) do Adapter.keyDown(c) end
-    Adapter.wait(CONFIG.keyTap)
-    for _,c in ipairs(plain) do Adapter.keyUp(c) end
-  end
-  if #sharp > 0 then
-    if #plain > 0 then Adapter.wait(CONFIG.chordGap) end
-    Adapter.shiftDown()
-    for _,c in ipairs(sharp) do Adapter.keyDown(c) end
-    Adapter.wait(CONFIG.keyTap)
-    for _,c in ipairs(sharp) do Adapter.keyUp(c) end
-    Adapter.shiftUp()
-  end
+  local ok, err = pcall(function()
+    if #plain > 0 then
+      for _,c in ipairs(plain) do Adapter.keyDown(c) end
+      Adapter.wait(CONFIG.keyTap)
+      for _,c in ipairs(plain) do Adapter.keyUp(c) end
+    end
+    if #sharp > 0 then
+      if #plain > 0 then Adapter.wait(CONFIG.chordGap) end
+      Adapter.shiftDown()
+      for _,c in ipairs(sharp) do Adapter.keyDown(c) end
+      Adapter.wait(CONFIG.keyTap)
+      for _,c in ipairs(sharp) do Adapter.keyUp(c) end
+      Adapter.shiftUp()
+    end
+  end)
+  if not ok then Adapter.releaseAll(); return false, err end
+  return true
 end
 
 local function stopPlayback()
   State.stop = true
+  Adapter.releaseAll()          -- immediately free any held keys
+end
+
+-- the actual note loop. `myToken` lets a newer Play/song supersede an older run.
+local function runPlayLoop(myToken)
+  Adapter.releaseAll()          -- clean slate before we press anything
+  State.stop = false
+  State.playing = true
+  local sched = State.prepared.schedule
+  local start = Adapter.now()
+  local errMsg
+  for i=1,#sched do
+    if State.stop or State.playToken ~= myToken then break end
+    local targetT = sched[i].t / (State.speed > 0 and State.speed or 1)
+    while (Adapter.now()-start) < targetT do
+      if State.stop or State.playToken ~= myToken then break end
+      Adapter.wait()
+    end
+    if State.stop or State.playToken ~= myToken then break end
+    local ok, err = sendChord(sched[i].keys)
+    if not ok then errMsg = err; break end
+  end
+  Adapter.releaseAll()          -- ALWAYS release on exit: finish / stop / error / superseded
+  State.playing = false
+  if State.playToken == myToken and setStatus then
+    if errMsg then setStatus("Playback error: " .. tostring(errMsg))
+    elseif State.stop then setStatus("Stopped.")
+    else setStatus("Finished.") end
+  end
 end
 
 local function startPlayback()
-  if State.playing or not State.prepared then return end
-  State.stop = false; State.playing = true
+  if not State.prepared then return end
+  State.playToken = (State.playToken or 0) + 1   -- supersede any running loop
+  local myToken = State.playToken
+  State.stop = true                              -- ask the old loop to bail out
   Adapter.spawn(function()
-    local sched = State.prepared.schedule
-    local start = Adapter.now()
-    for i=1,#sched do
-      if State.stop then break end
-      local targetT = sched[i].t / (State.speed > 0 and State.speed or 1)
-      while (Adapter.now()-start) < targetT do
-        if State.stop then break end
-        Adapter.wait()
-      end
-      if State.stop then break end
-      sendChord(sched[i].keys)
-    end
-    State.playing = false
-    if setStatus then setStatus(State.stop and "Stopped." or "Finished.") end
+    local guard = 0
+    while State.playing and guard < 300 do Adapter.wait(); guard = guard + 1 end
+    if State.playToken ~= myToken then return end -- a newer Play already took over
+    runPlayLoop(myToken)
   end)
 end
 
