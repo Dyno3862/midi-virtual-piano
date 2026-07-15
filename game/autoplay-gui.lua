@@ -385,6 +385,7 @@ local function runPlayLoop(myToken)
   Adapter.releaseAll()          -- clean slate before we press anything
   State.stop = false
   State.playing = true
+  if setStatus then setStatus("\u{25B6} Playing "..(State.current and State.current.name or "")) end
   local sched = buildSchedule(State.prepared.events, 0.03, CONFIG.transpose)
   State.playStart = Adapter.now()
   local start = State.playStart
@@ -403,9 +404,9 @@ local function runPlayLoop(myToken)
   Adapter.releaseAll()          -- ALWAYS release on exit: finish / stop / error / superseded
   State.playing = false
   if State.playToken == myToken and setStatus then
-    if errMsg then setStatus("Playback error: " .. tostring(errMsg))
-    elseif State.stop then setStatus("Stopped.")
-    else setStatus("Finished.") end
+    if errMsg then setStatus("\u{26A0} " .. tostring(errMsg))
+    elseif State.stop then setStatus("\u{23F9} Stopped")
+    else setStatus("\u{2714} Finished") end
   end
 end
 
@@ -466,34 +467,32 @@ end
 -- panel with finger-sized targets and larger fonts. The GUI build reads L.*,
 -- so there is only ONE build path for both.
 local DESKTOP = {
-  pad=10, gap=6, corner=6, cornerSm=5,
-  panelW=300, panelX=20, panelY=60,
-  headerH=26, titleFont=16, minBtnSize=24,
-  tabBarH=28, tabFont=13,
-  contentH=230,
-  srcH=26, srcFont=12,
-  searchH=28, searchFont=14,
-  rowH=28, rowFont=13, scrollBar=6,
-  fieldH=28, fieldFont=13, fieldLabelW=150, fieldBoxW=70,
-  toggleH=28, toggleFont=13, toggleBtnW=54,
-  statusH=18, statusFont=12,
-  btnH=34, btnFont=14,
-  fabSize=54, fabX=20, fabY=60, remFont=26,
+  pad=10, gap=8, corner=8, cornerSm=6, scrollBar=6,
+  panelW=440, panelH=340, panelX=40, panelY=60,
+  titleBarH=30, titleFont=14, winBtn=22,
+  sidebarW=120, tabItemH=40, tabFont=13,
+  cardTitleFont=14, cardSubFont=11, cardTextFont=13,
+  statusCardH=54, urlCardH=52, filesCardH=150,
+  srcH=24, srcFont=11, searchH=26, searchFont=13,
+  ddBtnH=28, ddPanelH=150, rowH=26, rowFont=12,
+  actionH=34, actionFont=13,
+  fieldH=30, fieldFont=13, fieldLabelW=160, fieldBoxW=70,
+  toggleH=30, toggleFont=13, toggleBtnW=56,
+  inputW=150, fabSize=52, fabX=40, fabY=60, remFont=24,
 }
 local MOBILE = {
-  pad=5, gap=4, corner=7, cornerSm=5,
-  panelW=148, panelX=8, panelY=8,
-  headerH=20, titleFont=13, minBtnSize=18,
-  tabBarH=22, tabFont=11,
-  contentH=150,
-  srcH=20, srcFont=10,
-  searchH=24, searchFont=13,
-  rowH=26, rowFont=12, scrollBar=6,
-  fieldH=24, fieldFont=12, fieldLabelW=76, fieldBoxW=48,
-  toggleH=24, toggleFont=11, toggleBtnW=40,
-  statusH=14, statusFont=10,
-  btnH=28, btnFont=13,
-  fabSize=44, fabX=8, fabY=8, remFont=18,
+  pad=6, gap=5, corner=8, cornerSm=6, scrollBar=5,
+  panelW=272, panelH=250, panelX=8, panelY=8,
+  titleBarH=24, titleFont=12, winBtn=18,
+  sidebarW=78, tabItemH=32, tabFont=10,
+  cardTitleFont=12, cardSubFont=9, cardTextFont=11,
+  statusCardH=46, urlCardH=44, filesCardH=126,
+  srcH=20, srcFont=9, searchH=22, searchFont=11,
+  ddBtnH=24, ddPanelH=120, rowH=24, rowFont=11,
+  actionH=28, actionFont=11,
+  fieldH=26, fieldFont=11, fieldLabelW=96, fieldBoxW=52,
+  toggleH=26, toggleFont=10, toggleBtnW=44,
+  inputW=104, fabSize=44, fabX=8, fabY=8, remFont=18,
 }
 local IS_MOBILE = detectMobile()
 local L = IS_MOBILE and MOBILE or DESKTOP
@@ -506,7 +505,17 @@ local function buildGui()
   local parent = plr and plr:WaitForChild("PlayerGui") or game:GetService("CoreGui")
   local C = Color3.fromRGB
   local pad, gap = L.pad, L.gap
-  local ACTIVE, INACTIVE = C(60,110,90), C(40,43,50)
+  -- palette
+  local PANEL   = C(30,30,30)
+  local SIDEBAR = C(24,24,24)
+  local CARD    = C(42,42,42)
+  local INPUT   = C(52,52,52)
+  local HILITE  = C(58,58,62)
+  local TXT     = C(240,240,242)
+  local MUTED   = C(158,158,164)
+  local ACCENT  = C(96,170,132)
+  local DANGER  = C(158,74,74)
+
   local function make(cls, props)
     local o = Instance.new(cls)
     for k,v in pairs(props or {}) do o[k]=v end
@@ -548,125 +557,159 @@ local function buildGui()
 
   -- top-right live remaining-time overlay
   local remLabel = make("TextLabel", { Parent=sg, Size=UDim2.new(0,90,0,30),
-    AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,-8,0,8), BackgroundColor3=C(15,17,20),
-    BackgroundTransparency=0.2, TextColor3=C(120,220,170), Font=Enum.Font.GothamBold,
+    AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,-8,0,8), BackgroundColor3=C(18,18,18),
+    BackgroundTransparency=0.15, TextColor3=ACCENT, Font=Enum.Font.GothamBold,
     TextSize=L.remFont, Text="0:00", Visible=false })
   corner(remLabel, 6)
 
   -- draggable floating button (tap to re-open)
   local fab = make("TextButton", { Parent=sg, Size=UDim2.new(0,L.fabSize,0,L.fabSize),
-    Position=UDim2.new(0,L.fabX,0,L.fabY), BackgroundColor3=C(40,120,80), TextColor3=C(240,244,250),
+    Position=UDim2.new(0,L.fabX,0,L.fabY), BackgroundColor3=ACCENT, TextColor3=C(20,20,20),
     Text="\u{266A}", Font=Enum.Font.GothamBold, TextSize=math.floor(L.fabSize*0.5),
     AutoButtonColor=true, Visible=false })
   corner(fab, math.floor(L.fabSize/2))
 
-  -- compact panel
-  local win = make("Frame", { Parent=sg, BackgroundColor3=C(24,26,31), BorderSizePixel=0,
-    Position=UDim2.new(0,L.panelX,0,L.panelY), Size=UDim2.new(0,L.panelW,0,100) })
+  -- panel
+  local win = make("Frame", { Parent=sg, BackgroundColor3=PANEL, BorderSizePixel=0,
+    Position=UDim2.new(0,L.panelX,0,L.panelY), Size=UDim2.new(0,L.panelW,0,L.panelH) })
   corner(win, L.corner)
-  local innerW = L.panelW - 2*pad
-  local y = pad
 
-  -- header: title + minimize (drag header to move panel)
-  local header = make("Frame", { Parent=win, BackgroundTransparency=1,
-    Size=UDim2.new(1,0,0,L.headerH), Position=UDim2.new(0,0,0,y) })
-  make("TextLabel", { Parent=header, BackgroundTransparency=1,
-    Size=UDim2.new(1,-L.minBtnSize-pad*2,0,L.headerH), Position=UDim2.new(0,pad,0,0),
-    Text="MIDI Autoplay", TextColor3=C(230,235,245), Font=Enum.Font.GothamBold,
-    TextSize=L.titleFont, TextXAlignment=Enum.TextXAlignment.Left })
-  local minBtn = corner(make("TextButton", { Parent=header, Size=UDim2.new(0,L.minBtnSize,0,L.minBtnSize),
-    Position=UDim2.new(1,-L.minBtnSize-pad,0,math.floor((L.headerH-L.minBtnSize)/2)),
-    BackgroundColor3=C(50,54,62), TextColor3=C(240,244,250), Text="\u{2013}",
-    Font=Enum.Font.GothamBold, TextSize=L.titleFont, AutoButtonColor=true }), L.cornerSm)
-  makeDraggable(header, win, nil)
-  y = y + L.headerH + gap
+  -- ===== title bar =====
+  local titleBar = make("Frame", { Parent=win, BackgroundTransparency=1, Active=true,
+    Size=UDim2.new(1,0,0,L.titleBarH), Position=UDim2.new(0,0,0,0) })
+  make("TextLabel", { Parent=titleBar, BackgroundTransparency=1, Text="MIDI Autoplay",
+    Size=UDim2.new(1,-3*L.winBtn-pad*3,1,0), Position=UDim2.new(0,pad,0,0), TextColor3=TXT,
+    Font=Enum.Font.GothamBold, TextSize=L.titleFont, TextXAlignment=Enum.TextXAlignment.Left })
+  local function winBtn(order, glyph, col)
+    local b = corner(make("TextButton", { Parent=titleBar, Size=UDim2.new(0,L.winBtn,0,L.winBtn),
+      Position=UDim2.new(1,-pad-order*L.winBtn-(order-1)*4,0,math.floor((L.titleBarH-L.winBtn)/2)),
+      BackgroundColor3=col or HILITE, TextColor3=TXT, Text=glyph, Font=Enum.Font.GothamBold,
+      TextSize=L.titleFont, AutoButtonColor=true }), L.cornerSm)
+    return b
+  end
+  local closeBtn = winBtn(1, "\u{2715}", DANGER)
+  local maxBtn   = winBtn(2, "\u{25A1}")
+  local minBtn   = winBtn(3, "\u{2013}")
+  makeDraggable(titleBar, win, nil)
 
-  -- tab bar: Songs / Prefs
-  local tabBar = make("Frame", { Parent=win, BackgroundTransparency=1,
-    Size=UDim2.new(1,-2*pad,0,L.tabBarH), Position=UDim2.new(0,pad,0,y) })
-  local tabSongs = corner(make("TextButton", { Parent=tabBar, Size=UDim2.new(0.49,0,1,0),
-    Position=UDim2.new(0,0,0,0), BackgroundColor3=ACTIVE, TextColor3=C(240,244,250),
-    Text="Songs", Font=Enum.Font.GothamBold, TextSize=L.tabFont, AutoButtonColor=true }), L.cornerSm)
-  local tabPrefs = corner(make("TextButton", { Parent=tabBar, Size=UDim2.new(0.49,0,1,0),
-    Position=UDim2.new(0.51,0,0,0), BackgroundColor3=INACTIVE, TextColor3=C(240,244,250),
-    Text="Prefs", Font=Enum.Font.GothamBold, TextSize=L.tabFont, AutoButtonColor=true }), L.cornerSm)
-  y = y + L.tabBarH + gap
+  -- ===== left sidebar =====
+  local sidebar = make("Frame", { Parent=win, BackgroundColor3=SIDEBAR, BorderSizePixel=0,
+    Position=UDim2.new(0,0,0,L.titleBarH), Size=UDim2.new(0,L.sidebarW,1,-L.titleBarH) })
+  local tabButtons = {}
+  local sy = gap
+  local function sidebarItem(key, icon, label)
+    local b = corner(make("TextButton", { Parent=sidebar, Size=UDim2.new(1,-2*gap,0,L.tabItemH),
+      Position=UDim2.new(0,gap,0,sy), BackgroundColor3=HILITE, BackgroundTransparency=1,
+      TextColor3=TXT, Text="  "..icon.."  "..label, Font=Enum.Font.GothamMedium,
+      TextSize=L.tabFont, TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false }), L.cornerSm)
+    tabButtons[key] = b; sy = sy + L.tabItemH + gap
+    return b
+  end
+  local tabMain     = sidebarItem("main", "\u{25A3}", "Main")
+  local tabSettings = sidebarItem("settings", "\u{2699}", "Settings")
 
-  -- content area (only the active tab's page is visible)
+  -- ===== content area (right) =====
   local content = make("Frame", { Parent=win, BackgroundTransparency=1,
-    Size=UDim2.new(1,-2*pad,0,L.contentH), Position=UDim2.new(0,pad,0,y) })
-  y = y + L.contentH + gap
+    Position=UDim2.new(0,L.sidebarW,0,L.titleBarH), Size=UDim2.new(1,-L.sidebarW,1,-L.titleBarH) })
+  local function newPage()
+    local sfr = make("ScrollingFrame", { Parent=content, BackgroundTransparency=1, BorderSizePixel=0,
+      Size=UDim2.new(1,-2*pad,1,-2*pad), Position=UDim2.new(0,pad,0,pad),
+      ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new() })
+    local lay = make("UIListLayout", { Parent=sfr, Padding=UDim.new(0,gap), SortOrder=Enum.SortOrder.LayoutOrder })
+    lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+      sfr.CanvasSize = UDim2.new(0,0,0, lay.AbsoluteContentSize.Y + gap)
+    end)
+    return sfr
+  end
+  local mainPage = newPage()
+  local settingsPage = newPage(); settingsPage.Visible = false
 
-  -- status line (visible on both tabs)
-  local status = make("TextLabel", { Parent=win, BackgroundTransparency=1,
-    Size=UDim2.new(1,-2*pad,0,L.statusH), Position=UDim2.new(0,pad,0,y), Text="Loading...",
-    TextColor3=C(120,220,170), Font=Enum.Font.Gotham, TextSize=L.statusFont,
-    TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd })
-  setStatus = function(t) status.Text = t end
-  y = y + L.statusH + gap
+  local function newCard(parent, order, h)
+    return corner(make("Frame", { Parent=parent, Size=UDim2.new(1,-L.scrollBar-2,0,h),
+      BackgroundColor3=CARD, BorderSizePixel=0, LayoutOrder=order }), L.corner)
+  end
+  local function cardLabel(card, txt, x, yy, w, font, colr, bold, align)
+    return make("TextLabel", { Parent=card, BackgroundTransparency=1, Text=txt,
+      Position=UDim2.new(0,x,0,yy), Size=UDim2.new(0,w,0,font+4), TextColor3=colr or TXT,
+      Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham, TextSize=font,
+      TextXAlignment=align or Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd })
+  end
 
-  -- footer: Play / Stop (ALWAYS visible, any tab)
-  local halfW = math.floor((innerW - gap) / 2)
-  local playBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,halfW,0,L.btnH),
-    Position=UDim2.new(0,pad,0,y), BackgroundColor3=C(40,120,80), TextColor3=C(240,244,250),
-    Text="Play", Font=Enum.Font.GothamBold, TextSize=L.btnFont, AutoButtonColor=true }))
-  local stopBtn = corner(make("TextButton", { Parent=win, Size=UDim2.new(0,halfW,0,L.btnH),
-    Position=UDim2.new(0,pad+halfW+gap,0,y), BackgroundColor3=C(150,60,60), TextColor3=C(240,244,250),
-    Text="Stop", Font=Enum.Font.GothamBold, TextSize=L.btnFont, AutoButtonColor=true }))
-  y = y + L.btnH + pad
-  win.Size = UDim2.new(0, L.panelW, 0, y)   -- fit the panel to its content
+  -- ---- MAIN: status card ----
+  local statusCard = newCard(mainPage, 1, L.statusCardH)
+  cardLabel(statusCard, "Status", pad, pad, 200, L.cardTitleFont, TXT, true)
+  local stateLbl = cardLabel(statusCard, "\u{23F9} Stopped", pad, pad+L.cardTitleFont+4,
+    L.panelW, L.cardTextFont, MUTED, false)
+  setStatus = function(t) stateLbl.Text = t end
 
-  -- ===== SONGS PAGE (sources + search + list) =====
-  local songsPage = make("Frame", { Parent=content, BackgroundTransparency=1, Size=UDim2.new(1,0,1,0) })
+  -- ---- MAIN: URL / filename card ----
+  local urlCard = newCard(mainPage, 2, L.urlCardH)
+  cardLabel(urlCard, "URL or Filename", pad, math.floor((L.urlCardH-L.cardTextFont)/2)-2,
+    L.panelW-L.inputW-3*pad, L.cardTextFont, TXT, false)
+  local urlBox = corner(make("TextBox", { Parent=urlCard, Size=UDim2.new(0,L.inputW,0,L.urlCardH-2*pad),
+    Position=UDim2.new(1,-pad-L.inputW,0,pad), BackgroundColor3=INPUT, TextColor3=TXT,
+    PlaceholderText="paste .mid URL / name", Text="", Font=Enum.Font.Gotham, TextSize=L.cardTextFont,
+    ClearTextOnFocus=false, TextXAlignment=Enum.TextXAlignment.Left }), L.cornerSm)
+
+  -- ---- MAIN: MIDI files card (sources + search + dropdown) ----
+  local filesCard = newCard(mainPage, 3, L.filesCardH)
+  cardLabel(filesCard, "MIDI Files", pad, pad, 200, L.cardTitleFont, TXT, true)
+  cardLabel(filesCard, "Choose from your collection", pad, pad+L.cardTitleFont+2, L.panelW,
+    L.cardSubFont, MUTED, false)
+  local fy = pad + L.cardTitleFont + L.cardSubFont + 6
+  local innerCW = L.panelW - L.sidebarW - 2*pad - L.scrollBar - 2*pad
   State.source = "collection"
-  local py = 0
-  local srcRow = make("Frame", { Parent=songsPage, BackgroundTransparency=1,
-    Size=UDim2.new(1,0,0,L.srcH), Position=UDim2.new(0,0,0,py) })
+  local srcRow = make("Frame", { Parent=filesCard, BackgroundTransparency=1,
+    Size=UDim2.new(1,-2*pad,0,L.srcH), Position=UDim2.new(0,pad,0,fy) })
   local srcButtons = {}
   local function setSource(src)
     State.source = src
-    for key,btn in pairs(srcButtons) do
-      btn.BackgroundColor3 = (key==src) and ACTIVE or INACTIVE
-    end
+    for k,b in pairs(srcButtons) do b.BackgroundColor3 = (k==src) and ACCENT or HILITE end
   end
-  local function mkSrc(key, label, xscale)
+  local function mkSrc(key,label,xs)
     local b = corner(make("TextButton", { Parent=srcRow, Size=UDim2.new(0.32,0,1,0),
-      Position=UDim2.new(xscale,0,0,0), BackgroundColor3=INACTIVE, TextColor3=C(230,235,245),
-      Text=label, Font=Enum.Font.Gotham, TextSize=L.srcFont, AutoButtonColor=true }), L.cornerSm)
-    srcButtons[key] = b; return b
+      Position=UDim2.new(xs,0,0,0), BackgroundColor3=HILITE, TextColor3=TXT, Text=label,
+      Font=Enum.Font.Gotham, TextSize=L.srcFont, AutoButtonColor=true }), L.cornerSm)
+    srcButtons[key]=b; return b
   end
   local bCol = mkSrc("collection","Coll",0)
   local bBit = mkSrc("bitmidi","Bit",0.34)
   local bMid = mkSrc("midifind","Find",0.68)
-  py = py + L.srcH + gap
-
-  local search = corner(make("TextBox", { Parent=songsPage, Size=UDim2.new(1,0,0,L.searchH),
-    Position=UDim2.new(0,0,0,py), BackgroundColor3=C(38,41,48), TextColor3=C(220,225,235),
+  fy = fy + L.srcH + gap
+  local search = corner(make("TextBox", { Parent=filesCard, Size=UDim2.new(1,-2*pad,0,L.searchH),
+    Position=UDim2.new(0,pad,0,fy), BackgroundColor3=INPUT, TextColor3=TXT,
     PlaceholderText="Search... (Enter)", Text="", Font=Enum.Font.Gotham, TextSize=L.searchFont,
-    ClearTextOnFocus=false }))
-  py = py + L.searchH + gap
+    ClearTextOnFocus=false }), L.cornerSm)
+  fy = fy + L.searchH + gap
+  local ddBtn = corner(make("TextButton", { Parent=filesCard, Size=UDim2.new(1,-2*pad,0,L.ddBtnH),
+    Position=UDim2.new(0,pad,0,fy), BackgroundColor3=INPUT, TextColor3=TXT,
+    Text="  Select a song  \u{25BE}", Font=Enum.Font.Gotham, TextSize=L.searchFont,
+    TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=true }), L.cornerSm)
 
-  local listH = L.contentH - py
-  local list = corner(make("ScrollingFrame", { Parent=songsPage, Size=UDim2.new(1,0,0,listH),
-    Position=UDim2.new(0,0,0,py), BackgroundColor3=C(18,20,24), BorderSizePixel=0,
-    ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new() }))
-  local layout = make("UIListLayout", { Parent=list, Padding=UDim.new(0,3),
+  -- dropdown popup (floats over everything)
+  local ddPanel = make("ScrollingFrame", { Parent=sg, Visible=false, BackgroundColor3=CARD,
+    BorderSizePixel=0, ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new(), ZIndex=5 })
+  corner(ddPanel, L.cornerSm)
+  local ddLayout = make("UIListLayout", { Parent=ddPanel, Padding=UDim.new(0,2),
     SortOrder=Enum.SortOrder.LayoutOrder })
 
-  -- ===== PREFS PAGE (transpose + speed + time-left toggle) =====
-  local prefsPage = make("Frame", { Parent=content, BackgroundTransparency=1,
-    Size=UDim2.new(1,0,1,0), Visible=false })
-  local qy = 0
-  local function prefField(labelText, boxText)
-    make("TextLabel", { Parent=prefsPage, BackgroundTransparency=1, Size=UDim2.new(0,L.fieldLabelW,0,L.fieldH),
-      Position=UDim2.new(0,0,0,qy), Text=labelText, TextColor3=C(200,205,215), Font=Enum.Font.Gotham,
-      TextSize=L.fieldFont, TextXAlignment=Enum.TextXAlignment.Left })
-    local box = corner(make("TextBox", { Parent=prefsPage, Size=UDim2.new(0,L.fieldBoxW,0,L.fieldH),
-      Position=UDim2.new(1,-L.fieldBoxW,0,qy), BackgroundColor3=C(38,41,48), TextColor3=C(225,230,240),
-      Text=boxText, Font=Enum.Font.Gotham, TextSize=L.fieldFont, ClearTextOnFocus=false }), L.cornerSm)
-    qy = qy + L.fieldH + gap
-    return box
+  -- ---- MAIN: action buttons ----
+  local function actionCard(order, label, icon, bg)
+    local b = corner(make("TextButton", { Parent=mainPage, Size=UDim2.new(1,-L.scrollBar-2,0,L.actionH),
+      BackgroundColor3=bg or CARD, TextColor3=TXT, Text="   "..label, Font=Enum.Font.GothamMedium,
+      TextSize=L.actionFont, TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=true,
+      LayoutOrder=order }), L.corner)
+    make("TextLabel", { Parent=b, BackgroundTransparency=1, Size=UDim2.new(0,26,1,0),
+      Position=UDim2.new(1,-30,0,0), Text=icon, TextColor3=ACCENT, Font=Enum.Font.GothamBold,
+      TextSize=L.actionFont+2 })
+    return b
   end
+  local loadBtn    = actionCard(4, "Load", "\u{2193}")
+  local refreshBtn = actionCard(5, "Refresh File List", "\u{21BB}")
+  local playBtn    = actionCard(6, "Play", "\u{25B6}")
+  local stopBtn    = actionCard(7, "Stop", "\u{25A0}")
+
+  -- ---- SETTINGS page ----
   local function numField(box, getCur, lo, hi, fmt, apply, isInt)
     box.FocusLost:Connect(function()
       local n = tonumber(box.Text)
@@ -674,50 +717,65 @@ local function buildGui()
         if n < lo then n = lo elseif n > hi then n = hi end
         if isInt then n = math.floor(n + 0.5) end
         apply(n); box.Text = string.format(fmt, n)
-      else
-        box.Text = string.format(fmt, getCur())
-      end
+      else box.Text = string.format(fmt, getCur()) end
     end)
   end
-  local transposeBox = prefField("Transpose (st)", string.format("%d", CONFIG.transpose))
+  local function settingRow(order, labelText, boxText)
+    local cardH = L.fieldH + 2*pad
+    local card = newCard(settingsPage, order, cardH)
+    cardLabel(card, labelText, pad, math.floor((cardH-L.fieldFont)/2)-2, L.fieldLabelW, L.fieldFont, TXT, false)
+    local box = corner(make("TextBox", { Parent=card, Size=UDim2.new(0,L.fieldBoxW,0,L.fieldH),
+      Position=UDim2.new(1,-pad-L.fieldBoxW,0,pad), BackgroundColor3=INPUT, TextColor3=TXT,
+      Text=boxText, Font=Enum.Font.Gotham, TextSize=L.fieldFont, ClearTextOnFocus=false }), L.cornerSm)
+    return box
+  end
+  local transposeBox = settingRow(1, "Transpose (semitones)", string.format("%d", CONFIG.transpose))
   numField(transposeBox, function() return CONFIG.transpose end, -24, 24, "%d",
     function(n) CONFIG.transpose = n end, true)
-  local speedBox = prefField("Speed", string.format("%.2f", State.speed))
+  local speedBox = settingRow(2, "Speed (tempo)", string.format("%.2f", State.speed))
   numField(speedBox, function() return State.speed end, 0.25, 3.0, "%.2f",
     function(n) State.speed = n end)
-
   local prefsShowRemaining = false
-  make("TextLabel", { Parent=prefsPage, BackgroundTransparency=1,
-    Size=UDim2.new(1,-L.toggleBtnW-gap,0,L.toggleH), Position=UDim2.new(0,0,0,qy),
-    Text="Show time left", TextColor3=C(200,205,215), Font=Enum.Font.Gotham,
-    TextSize=L.toggleFont, TextXAlignment=Enum.TextXAlignment.Left })
-  local remToggle = corner(make("TextButton", { Parent=prefsPage, Size=UDim2.new(0,L.toggleBtnW,0,L.toggleH),
-    Position=UDim2.new(1,-L.toggleBtnW,0,qy), BackgroundColor3=C(80,60,60), TextColor3=C(240,244,250),
+  local togH = L.toggleH + 2*pad
+  local togCard = newCard(settingsPage, 3, togH)
+  cardLabel(togCard, "Show time left", pad, math.floor((togH-L.toggleFont)/2)-2,
+    L.panelW, L.toggleFont, TXT, false)
+  local remToggle = corner(make("TextButton", { Parent=togCard, Size=UDim2.new(0,L.toggleBtnW,0,L.toggleH),
+    Position=UDim2.new(1,-pad-L.toggleBtnW,0,pad), BackgroundColor3=DANGER, TextColor3=TXT,
     Text="OFF", Font=Enum.Font.GothamBold, TextSize=L.toggleFont, AutoButtonColor=true }), L.cornerSm)
   remToggle.MouseButton1Click:Connect(function()
     prefsShowRemaining = not prefsShowRemaining
     remToggle.Text = prefsShowRemaining and "ON" or "OFF"
-    remToggle.BackgroundColor3 = prefsShowRemaining and ACTIVE or C(80,60,60)
+    remToggle.BackgroundColor3 = prefsShowRemaining and ACCENT or DANGER
   end)
 
-  -- ===== tab switching (only one page visible) =====
+  -- ===== tab switching =====
   local function setTab(name)
-    songsPage.Visible = (name == "songs")
-    prefsPage.Visible = (name == "prefs")
-    tabSongs.BackgroundColor3 = (name == "songs") and ACTIVE or INACTIVE
-    tabPrefs.BackgroundColor3 = (name == "prefs") and ACTIVE or INACTIVE
+    mainPage.Visible = (name=="main")
+    settingsPage.Visible = (name=="settings")
+    for k,b in pairs(tabButtons) do b.BackgroundTransparency = (k==name) and 0 or 1 end
   end
-  tabSongs.MouseButton1Click:Connect(function() setTab("songs") end)
-  tabPrefs.MouseButton1Click:Connect(function() setTab("prefs") end)
-  setTab("songs")
+  tabMain.MouseButton1Click:Connect(function() setTab("main") end)
+  tabSettings.MouseButton1Click:Connect(function() setTab("settings") end)
+  setTab("main")
 
-  -- ===== minimize / FAB / auto-minimize =====
-  local function setMinimized(m) win.Visible = not m; fab.Visible = m end
+  -- ===== window controls =====
+  local function setMinimized(m) win.Visible = not m; fab.Visible = m; if m then ddPanel.Visible=false end end
+  local maximized = false
   minBtn.MouseButton1Click:Connect(function() setMinimized(true) end)
+  maxBtn.MouseButton1Click:Connect(function()
+    maximized = not maximized
+    if maximized then
+      win.Size = UDim2.new(0, math.floor(L.panelW*1.35), 0, math.floor(L.panelH*1.35))
+    else
+      win.Size = UDim2.new(0, L.panelW, 0, L.panelH)
+    end
+  end)
+  closeBtn.MouseButton1Click:Connect(function() sg.Enabled = false end)   -- clean close
   makeDraggable(fab, fab, function() setMinimized(false) end)
   onPlayStart = function() setMinimized(true) end
 
-  -- ===== live remaining-time countdown =====
+  -- ===== countdown =====
   RunService.Heartbeat:Connect(function()
     if State.playing and prefsShowRemaining and State.prepared then
       local dur = (State.prepared.total or 0) / (State.speed > 0 and State.speed or 1)
@@ -725,76 +783,128 @@ local function buildGui()
       if rem < 0 then rem = 0 end
       remLabel.Text = string.format("%d:%02d", math.floor(rem/60), math.floor(rem % 60))
       remLabel.Visible = true
-    else
-      remLabel.Visible = false
-    end
+    else remLabel.Visible = false end
   end)
 
-  -- ===== play / stop =====
-  playBtn.MouseButton1Click:Connect(function()
-    if State.prepared then startPlayback() else setStatus("Pick a song first.") end
-  end)
-  stopBtn.MouseButton1Click:Connect(stopPlayback)
-
-  -- ===== list population + search routing =====
+  -- ===== data: collection + search + dropdown =====
   local repoFiles = {}
-  local function populate(entries)
-    for _,ch in ipairs(list:GetChildren()) do
-      if ch:IsA("TextButton") then ch:Destroy() end
+  local currentResults = {}
+  local selectedEntry = nil
+  local ddOpen = false
+
+  local function ddRefresh()
+    for _,ch in ipairs(ddPanel:GetChildren()) do if ch:IsA("TextButton") then ch:Destroy() end end
+    for i,entry in ipairs(currentResults) do
+      local b = corner(make("TextButton", { Parent=ddPanel, Size=UDim2.new(1,-L.scrollBar-2,0,L.rowH),
+        BackgroundColor3=INPUT, TextColor3=TXT, Text=" "..entry.name, Font=Enum.Font.Gotham,
+        TextSize=L.rowFont, TextXAlignment=Enum.TextXAlignment.Left, LayoutOrder=i,
+        TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=6 }), L.cornerSm)
+      b.MouseButton1Click:Connect(function()
+        selectedEntry = entry
+        ddBtn.Text = "  "..entry.name
+        ddOpen = false; ddPanel.Visible = false
+      end)
     end
-    for i,entry in ipairs(entries) do
-      local b = corner(make("TextButton", { Parent=list, Size=UDim2.new(1,-L.scrollBar-2,0,L.rowH),
-        BackgroundColor3=C(34,37,44), TextColor3=C(225,230,240), Text=" "..entry.name,
-        Font=Enum.Font.Gotham, TextSize=L.rowFont, TextXAlignment=Enum.TextXAlignment.Left,
-        LayoutOrder=i, TextTruncate=Enum.TextTruncate.AtEnd }), L.cornerSm)
-      b.MouseButton1Click:Connect(function() loadAndMaybePlay(entry, true) end)
-    end
-    list.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 6)
+    ddPanel.CanvasSize = UDim2.new(0,0,0, ddLayout.AbsoluteContentSize.Y + 4)
   end
+  local function setResults(list)
+    currentResults = list or {}
+    if ddOpen then ddRefresh() end
+  end
+  ddBtn.MouseButton1Click:Connect(function()
+    ddOpen = not ddOpen
+    if ddOpen then
+      local ap = ddBtn.AbsolutePosition
+      ddPanel.Position = UDim2.new(0, ap.X, 0, ap.Y + ddBtn.AbsoluteSize.Y + 2)
+      ddPanel.Size = UDim2.new(0, ddBtn.AbsoluteSize.X, 0, L.ddPanelH)
+      ddRefresh(); ddPanel.Visible = true
+    else ddPanel.Visible = false end
+  end)
+
   local function filterCollection(q)
     q = (q or ""):lower()
     local out = {}
     for _,e in ipairs(repoFiles) do
       if q == "" or e.name:lower():find(q, 1, true) then out[#out+1] = e end
     end
-    populate(out)
+    setResults(out)
   end
   local function runSearch()
     local q = search.Text
     if State.source == "collection" then
-      filterCollection(q); setStatus(#repoFiles.." in collection.")
-    elseif q == "" then
-      setStatus("Type a search and press Enter.")
+      filterCollection(q); setStatus(#currentResults.." in collection")
+    elseif q == "" then setStatus("Type a search and press Enter.")
     else
-      local siteName = (State.source == "bitmidi") and "BitMidi" or "MIDIFind"
-      setStatus("Searching "..siteName.."...")
+      local site = (State.source=="bitmidi") and "BitMidi" or "MIDIFind"
+      setStatus("Searching "..site.."...")
       Adapter.spawn(function()
         local files, err
-        if State.source == "bitmidi" then files, err = searchBitMidi(q)
-        else files, err = searchMidiFind(q) end
-        if not files then setStatus(tostring(err)); populate({}); return end
-        populate(files); setStatus(#files.." results.")
+        if State.source=="bitmidi" then files,err = searchBitMidi(q) else files,err = searchMidiFind(q) end
+        if not files then setStatus(tostring(err)); setResults({}); return end
+        setResults(files); setStatus(#files.." results")
       end)
     end
   end
-
-  bCol.MouseButton1Click:Connect(function() setSource("collection"); filterCollection(search.Text); setStatus(#repoFiles.." in collection.") end)
-  bBit.MouseButton1Click:Connect(function() setSource("bitmidi"); populate({}); setStatus("BitMidi: search + Enter.") end)
-  bMid.MouseButton1Click:Connect(function() setSource("midifind"); populate({}); setStatus("MIDIFind: search + Enter.") end)
+  bCol.MouseButton1Click:Connect(function() setSource("collection"); filterCollection(search.Text) end)
+  bBit.MouseButton1Click:Connect(function() setSource("bitmidi"); setResults({}); setStatus("BitMidi: search + Enter") end)
+  bMid.MouseButton1Click:Connect(function() setSource("midifind"); setResults({}); setStatus("MIDIFind: search + Enter") end)
   setSource("collection")
-
-  search.FocusLost:Connect(function(enterPressed) if enterPressed then runSearch() end end)
+  search.FocusLost:Connect(function(enter) if enter then runSearch() end end)
   search:GetPropertyChangedSignal("Text"):Connect(function()
-    if State.source == "collection" then filterCollection(search.Text) end
+    if State.source=="collection" then filterCollection(search.Text) end
   end)
+
+  -- ===== load-from-input (URL or filename) =====
+  local function loadFromInput(txt)
+    txt = tostring(txt or ""):gsub("^%s+",""):gsub("%s+$","")
+    if txt == "" then setStatus("Enter a URL or filename."); return end
+    local entry
+    if txt:lower():match("^https?://") then
+      entry = { name = (txt:match("([^/]+)%.midi?$") or txt:match("([^/]+)$") or txt), url = txt }
+    else
+      for _,e in ipairs(repoFiles) do
+        if e.name:lower():find(txt:lower(), 1, true) then entry = e; break end
+      end
+      if not entry then
+        local fn = txt
+        if not fn:lower():match("%.midi?$") then fn = fn..".mid" end
+        entry = { name = txt, url = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(
+          CONFIG.repoOwner, CONFIG.repoName, CONFIG.branch) .. urlencode(fn) }
+      end
+    end
+    loadAndMaybePlay(entry, false)
+  end
+
+  -- ===== action buttons =====
+  loadBtn.MouseButton1Click:Connect(function()
+    if (search and urlBox.Text:gsub("%s","") ~= "") then loadFromInput(urlBox.Text)
+    elseif selectedEntry then loadAndMaybePlay(selectedEntry, false)
+    else setStatus("Pick a song or paste a URL.") end
+  end)
+  local function refreshList()
+    setStatus("Refreshing...")
+    Adapter.spawn(function()
+      local files, err = listSongs()
+      if not files then setStatus("Refresh failed: "..tostring(err)); return end
+      repoFiles = files
+      if State.source=="collection" then filterCollection(search.Text) end
+      setStatus(#files.." songs in collection")
+    end)
+  end
+  refreshBtn.MouseButton1Click:Connect(refreshList)
+  playBtn.MouseButton1Click:Connect(function()
+    if State.prepared then startPlayback() else setStatus("Load a song first.") end
+  end)
+  stopBtn.MouseButton1Click:Connect(stopPlayback)
 
   setMinimized(false)
 
+  -- initial collection load
   Adapter.spawn(function()
     local files, err = listSongs()
     if not files then setStatus("Collection error: "..tostring(err)); return end
     repoFiles = files
-    if State.source == "collection" then populate(files) end
+    filterCollection("")
     setStatus(#files.." songs. Pick one.")
   end)
 end
