@@ -467,18 +467,18 @@ end
 -- panel with finger-sized targets and larger fonts. The GUI build reads L.*,
 -- so there is only ONE build path for both.
 local DESKTOP = {
-  pad=10, gap=8, corner=8, cornerSm=6, scrollBar=6,
-  panelW=440, panelH=340, panelX=40, panelY=60,
-  titleBarH=30, titleFont=14, winBtn=22,
-  sidebarW=120, tabItemH=40, tabFont=13,
-  cardTitleFont=14, cardSubFont=11, cardTextFont=13,
-  statusCardH=54, urlCardH=52, filesCardH=150,
-  srcH=24, srcFont=11, searchH=26, searchFont=13,
-  ddBtnH=28, ddPanelH=150, rowH=26, rowFont=12,
-  actionH=34, actionFont=13,
-  fieldH=30, fieldFont=13, fieldLabelW=160, fieldBoxW=70,
-  toggleH=30, toggleFont=13, toggleBtnW=56,
-  inputW=150, fabSize=52, fabX=40, fabY=60, remFont=24,
+  pad=12, gap=10, corner=8, cornerSm=6, scrollBar=8,
+  panelW=580, panelH=480, panelX=60, panelY=60,
+  titleBarH=36, titleFont=17, winBtn=26,
+  sidebarW=150, tabItemH=48, tabFont=15,
+  cardTitleFont=17, cardSubFont=12, cardTextFont=15,
+  statusCardH=66, urlCardH=64, filesCardH=300,
+  srcH=30, srcFont=13, searchH=32, searchFont=15,
+  ddBtnH=30, ddPanelH=200, rowH=32, rowFont=14,
+  actionH=44, actionFont=15,
+  fieldH=36, fieldFont=15, fieldLabelW=210, fieldBoxW=90,
+  toggleH=36, toggleFont=15, toggleBtnW=66,
+  inputW=220, fabSize=58, fabX=60, fabY=60, remFont=28,
 }
 local MOBILE = {
   pad=6, gap=5, corner=8, cornerSm=6, scrollBar=5,
@@ -681,17 +681,27 @@ local function buildGui()
     PlaceholderText="Search... (Enter)", Text="", Font=Enum.Font.Gotham, TextSize=L.searchFont,
     ClearTextOnFocus=false }), L.cornerSm)
   fy = fy + L.searchH + gap
-  local ddBtn = corner(make("TextButton", { Parent=filesCard, Size=UDim2.new(1,-2*pad,0,L.ddBtnH),
-    Position=UDim2.new(0,pad,0,fy), BackgroundColor3=INPUT, TextColor3=TXT,
-    Text="  Select a song  \u{25BE}", Font=Enum.Font.Gotham, TextSize=L.searchFont,
-    TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=true }), L.cornerSm)
-
-  -- dropdown popup (floats over everything)
-  local ddPanel = make("ScrollingFrame", { Parent=sg, Visible=false, BackgroundColor3=CARD,
-    BorderSizePixel=0, ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new(), ZIndex=5 })
-  corner(ddPanel, L.cornerSm)
-  local ddLayout = make("UIListLayout", { Parent=ddPanel, Padding=UDim.new(0,2),
-    SortOrder=Enum.SortOrder.LayoutOrder })
+  -- song picker: desktop = tall inline scrollable list (all songs); mobile = dropdown
+  local resultsContainer, resultsLayout
+  local ddBtn, ddPanel, ddLayout
+  local ddOpen = false
+  if IS_MOBILE then
+    ddBtn = corner(make("TextButton", { Parent=filesCard, Size=UDim2.new(1,-2*pad,0,L.ddBtnH),
+      Position=UDim2.new(0,pad,0,fy), BackgroundColor3=INPUT, TextColor3=TXT,
+      Text="  Select a song  \u{25BE}", Font=Enum.Font.Gotham, TextSize=L.searchFont,
+      TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=true }), L.cornerSm)
+    ddPanel = make("ScrollingFrame", { Parent=sg, Visible=false, BackgroundColor3=CARD,
+      BorderSizePixel=0, ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new(), ZIndex=5 })
+    corner(ddPanel, L.cornerSm)
+    ddLayout = make("UIListLayout", { Parent=ddPanel, Padding=UDim.new(0,2), SortOrder=Enum.SortOrder.LayoutOrder })
+    resultsContainer, resultsLayout = ddPanel, ddLayout
+  else
+    local listH = L.filesCardH - fy - pad
+    resultsContainer = corner(make("ScrollingFrame", { Parent=filesCard, BackgroundColor3=C(34,34,34),
+      BorderSizePixel=0, ScrollBarThickness=L.scrollBar, CanvasSize=UDim2.new(),
+      Size=UDim2.new(1,-2*pad,0,listH), Position=UDim2.new(0,pad,0,fy) }), L.cornerSm)
+    resultsLayout = make("UIListLayout", { Parent=resultsContainer, Padding=UDim.new(0,3), SortOrder=Enum.SortOrder.LayoutOrder })
+  end
 
   -- ---- MAIN: action buttons ----
   local function actionCard(order, label, icon, bg)
@@ -760,7 +770,7 @@ local function buildGui()
   setTab("main")
 
   -- ===== window controls =====
-  local function setMinimized(m) win.Visible = not m; fab.Visible = m; if m then ddPanel.Visible=false end end
+  local function setMinimized(m) win.Visible = not m; fab.Visible = m; if m and ddPanel then ddPanel.Visible=false end end
   local maximized = false
   minBtn.MouseButton1Click:Connect(function() setMinimized(true) end)
   maxBtn.MouseButton1Click:Connect(function()
@@ -790,36 +800,43 @@ local function buildGui()
   local repoFiles = {}
   local currentResults = {}
   local selectedEntry = nil
-  local ddOpen = false
 
-  local function ddRefresh()
-    for _,ch in ipairs(ddPanel:GetChildren()) do if ch:IsA("TextButton") then ch:Destroy() end end
-    for i,entry in ipairs(currentResults) do
-      local b = corner(make("TextButton", { Parent=ddPanel, Size=UDim2.new(1,-L.scrollBar-2,0,L.rowH),
+  local function renderResults(entries)
+    for _,ch in ipairs(resultsContainer:GetChildren()) do
+      if ch:IsA("TextButton") then ch:Destroy() end
+    end
+    for i,entry in ipairs(entries) do
+      local b = corner(make("TextButton", { Parent=resultsContainer, Size=UDim2.new(1,-L.scrollBar-2,0,L.rowH),
         BackgroundColor3=INPUT, TextColor3=TXT, Text=" "..entry.name, Font=Enum.Font.Gotham,
         TextSize=L.rowFont, TextXAlignment=Enum.TextXAlignment.Left, LayoutOrder=i,
-        TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=6 }), L.cornerSm)
+        TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=(IS_MOBILE and 6 or 1) }), L.cornerSm)
       b.MouseButton1Click:Connect(function()
         selectedEntry = entry
-        ddBtn.Text = "  "..entry.name
-        ddOpen = false; ddPanel.Visible = false
+        if IS_MOBILE and ddPanel then ddBtn.Text = "  "..entry.name; ddOpen = false; ddPanel.Visible = false end
+        loadAndMaybePlay(entry, false)
       end)
     end
-    ddPanel.CanvasSize = UDim2.new(0,0,0, ddLayout.AbsoluteContentSize.Y + 4)
+    resultsContainer.CanvasSize = UDim2.new(0,0,0, resultsLayout.AbsoluteContentSize.Y + 4)
   end
   local function setResults(list)
     currentResults = list or {}
-    if ddOpen then ddRefresh() end
+    if IS_MOBILE then
+      if ddOpen then renderResults(currentResults) end
+    else
+      renderResults(currentResults)      -- desktop: always show the full list inline
+    end
   end
-  ddBtn.MouseButton1Click:Connect(function()
-    ddOpen = not ddOpen
-    if ddOpen then
-      local ap = ddBtn.AbsolutePosition
-      ddPanel.Position = UDim2.new(0, ap.X, 0, ap.Y + ddBtn.AbsoluteSize.Y + 2)
-      ddPanel.Size = UDim2.new(0, ddBtn.AbsoluteSize.X, 0, L.ddPanelH)
-      ddRefresh(); ddPanel.Visible = true
-    else ddPanel.Visible = false end
-  end)
+  if IS_MOBILE then
+    ddBtn.MouseButton1Click:Connect(function()
+      ddOpen = not ddOpen
+      if ddOpen then
+        local ap = ddBtn.AbsolutePosition
+        ddPanel.Position = UDim2.new(0, ap.X, 0, ap.Y + ddBtn.AbsoluteSize.Y + 2)
+        ddPanel.Size = UDim2.new(0, ddBtn.AbsoluteSize.X, 0, L.ddPanelH)
+        renderResults(currentResults); ddPanel.Visible = true
+      else ddPanel.Visible = false end
+    end)
+  end
 
   local function filterCollection(q)
     q = (q or ""):lower()
